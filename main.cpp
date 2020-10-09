@@ -3,23 +3,25 @@
 
 using namespace std;
 
-mt19937_64 gen;
-
 const int sample_size=90;
-const int njack=15;
+const int njack=90;
 const int nboot=1000;
 const double err=0.1;
+const int npoints=10;
+vector<mt19937_64> gen(npoints);
+
+int iexp;
 
 //! return an integer random number in the range [min,max)
-double get_gauss(const double ave,const double sig)
+double get_gauss(const double ave,const double sig,mt19937_64& g)
 {
-  return normal_distribution<>(ave,sig)(gen);
+  return normal_distribution<>(ave,sig)(g);
 }
 
 //! return an integer random number in the range [min,max)
-double get_int(int min,int max)
+double get_int(const int min,const int max,mt19937_64& g)
 {
-  return uniform_int_distribution<>(min,max-1)(gen);
+  return uniform_int_distribution<>(min,max-1)(g);
 }
 
 struct data
@@ -90,18 +92,19 @@ struct data
     return sqrt(ave2);
   }
   
-  data(const double& x) : x(x),jack(njack),boot(nboot)
+  data(const double& x,mt19937_64& g) : x(x),jack(njack),boot(nboot)
   {
     vector<double> r(sample_size);
     
     for(auto& ri : r)
-      ri=get_gauss(x,err);
+      ri=get_gauss(x,err,g);
     
-    for(auto& b : boot)
+    if(iexp==0)
+      for(auto& b : boot)
       {
 	b=0;
 	for(int i=0;i<sample_size;i++)
-	  b+=r[get_int(0,sample_size)];
+	  b+=r[get_int(0,sample_size,g)];
 	b/=sample_size;
       }
     
@@ -125,88 +128,106 @@ struct data
 
 int main(int narg,char** arg)
 {
-  vector<data> n;
-  
-  const int npoints=10;
+  mt19937_64 glb_gen;
   
   if(narg>1)
-    gen.seed(atoi(arg[1]));
+    glb_gen.seed(atoi(arg[1]));
   
-  for(int i=0;i<npoints;i++)
+  const int nexp=1000;
+  
+  for(iexp=0;iexp<nexp;iexp++)
     {
-      //gen.seed(iatoi(arg[1]));
-      n.push_back(get_gauss(0,1.0));
-    }
-  
-  double ca=0;
-  double ce=0;
-  
+      vector<data> n;
+      
       for(int ipoint=0;ipoint<npoints;ipoint++)
-      cout<<"eee "<<ipoint<<" "<<n[ipoint].jack_ave()<<endl;
+	{
+	  mt19937_64& g=gen[ipoint];
+	  g.seed(get_int(0,1<<31,glb_gen));
+	  //gen.seed(iatoi(arg[1]));
+	  n.emplace_back(get_gauss(0,1.0,g),g);
+	}
       
-  for(int ijack=0;ijack<njack;ijack++)
-    {
+      double ca;
+      double ce;
+      
+      if(iexp==0)
+	{
+	  ca=0;
+	  ce=0;
+	  
+	  for(int ijack=0;ijack<njack;ijack++)
+	    {
+	      double c=0;
+	      for(int i=0;i<npoints;i++)
+		{
+		  const double x=(n[i].jack[ijack]-n[i].x)/n[i].jack_err();
+		  c+=x*x;
+		}
+	      
+	      c/=npoints;
+	      
+	      cout<<"jch2: "<<c<<endl;
+	      
+	      ca+=c;
+	      ce+=c*c;
+	    }
+	  
+	  ca/=njack;
+	  ce/=njack;
+	  ce-=ca*ca;
+	  cout<<"Jack ch2: "<<ca<<" +- "<<sqrt(ce/njack*(njack-1))<<endl;
+	  
+	  cout<<"/////////////////////////////////////////////////////////////////"<<endl;
+	}
+      
+      if(iexp==0)
+	{
+	  ca=0;
+	  ce=0;
+	  
+	  for(int iboot=0;iboot<nboot;iboot++)
+	    {
+	      double c=0;
+	      for(int i=0;i<npoints;i++)
+		{
+		  const double x=(n[i].boot[iboot]-n[i].x)/n[i].boot_err();
+		  c+=x*x;
+		}
+	      
+	      c/=npoints;
+	      
+	      cout<<"bch2: "<<c<<endl;
+	      
+	      ca+=c;
+	      ce+=c*c;
+	    }
+	  
+	  ca/=nboot;
+	  ce/=nboot;
+	  ce-=ca*ca;
+	  
+	  cout<<"Boot ch2: "<<ca<<" +- "<<sqrt(ce)<<endl;
+	  
+	  cout<<"/////////////////////////////////////////////////////////////////"<<endl;
+	}
+      
       double c=0;
       for(int i=0;i<npoints;i++)
 	{
-	  const double x=(n[i].jack[ijack]-n[i].x)/n[i].jack_err();
+	  const double x=(n[i].jack_ave()-n[i].x)/n[i].jack_err();
 	  c+=x*x;
 	}
       
       c/=npoints;
       
-      ca+=c;
-      ce+=c*c;
-    }
-  
-  ca/=njack;
-  ce/=njack;
-  ce-=ca*ca;
-  cout<<"Jack ch2: "<<ca<<" +- "<<sqrt(ce/njack*(njack-1))<<endl;
-  
-  cout<<"/////////////////////////////////////////////////////////////////"<<endl;
-  
-  ca=0;
-  ce=0;
-  for(int iboot=0;iboot<nboot;iboot++)
-    {
-      double c=0;
-      for(int i=0;i<npoints;i++)
-	{
-	  const double x=(n[i].boot[iboot]-n[i].x)/n[i].boot_err();
-	  c+=x*x;
-	}
+      cout<<"ch2: "<<c<<endl;
       
-      c/=npoints;
-      
-      ca+=c;
-      ce+=c*c;
+      // for(int i=0;i<npoints;i++)
+      // 	cout<<n[i].x<<"\t"
+      // 	    <<" "<<(n[i].boot_ave()-n[i].x)/n[i].boot_err()<<"\t"
+      // 	    <<" "<<(n[i].jack_ave()-n[i].x)/n[i].jack_err()<<"\t"
+      // 	    <<" "<<n[i].boot_err()/n[i].jack_err()<<endl;
     }
-  
-  ca/=nboot;
-  ce/=nboot;
-  ce-=ca*ca;
-  
-  cout<<"Boot ch2: "<<ca<<" +- "<<sqrt(ce)<<endl;
-  
-  cout<<"/////////////////////////////////////////////////////////////////"<<endl;
-  
-  double c=0;
-  for(int i=0;i<npoints;i++)
-    {
-      const double x=(n[i].jack_ave()-n[i].x)/n[i].jack_err();
-      c+=x*x;
-    }
-  
-  c/=npoints;
-  
-  cout<<"ch2: "<<c<<endl;
-  
-  for(int i=0;i<npoints;i++)
-    cout<<n[i].x<<"\t"
-	<<" "<<(n[i].boot_ave()-n[i].x)/n[i].boot_err()<<"\t"
-	<<" "<<(n[i].jack_ave()-n[i].x)/n[i].jack_err()<<"\t"
-  	<<" "<<n[i].boot_err()/n[i].jack_err()<<endl;
   
   return 0;
 }
